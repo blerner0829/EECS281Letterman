@@ -12,9 +12,10 @@
 #include <iomanip>
 #include <string>
 #include <vector>
-#include <algorithm>
-#include <deque>
 #include <limits>
+#include <algorithm>
+
+#include <deque>
 #include <tuple>
 
 using namespace std;
@@ -76,7 +77,9 @@ enum class ModificationType
     kNone = 0,
     kChange,
     kLength,
-    kSwap
+    kSwap,
+    kDelete,
+    kInsert
 };
 
 // TODO: copy for all enums
@@ -89,13 +92,19 @@ ostream &operator<<(ostream &os, const ModificationType &m)
         break;
 
     case ModificationType::kLength:
-        os << "kLength";
+        os << "l";
         break;
     case ModificationType::kChange:
-        os << "kChange";
+        os << "c";
         break;
     case ModificationType::kSwap:
-        os << "kSwap";
+        os << "s";
+        break;
+    case ModificationType::kDelete:
+        os << "d";
+        break;
+    case ModificationType::kInsert:
+        os << "i";
         break;
     }
     return os;
@@ -111,6 +120,14 @@ void printHelp(char *argv[])
     cout << "reserve and how to properly read until end-of-file." << endl;
 } // printHelp()
 
+bool manualFind(ModificationType t, const vector<ModificationType> &mods) {
+    for (auto it = mods.begin(); it != mods.end(); it++) {
+        if (*it == t) {
+            return true;  // Return iterator to the found element
+        }
+    }
+    return false;  // Return end iterator if the element is not found
+}
 // This struct is used to pass options read from the command line, to
 // the functions that actually do the work. Project 0 is simple enough to
 // not need this, but it is a technique that could be helpful in doing more
@@ -135,7 +152,7 @@ struct DictionaryEntry
     char modLetter;
 
     // Constructor
-    DictionaryEntry(const string &w) : word(w), discovered(false), previousIndex(numeric_limits<size_t>::max()) {}
+    DictionaryEntry(const string &w) : word(w), discovered(false), previousIndex(numeric_limits<size_t>::max()), modType(ModificationType::kNone), modIndex(numeric_limits<size_t>::max()), modLetter('F') {}
 };
 
 // Define the Dictionary class
@@ -143,6 +160,14 @@ class Dictionary
 {
 public:
     // Add member functions as needed
+    string reverseString(const string& str) {
+        string reversedStr = str;
+        size_t len = reversedStr.length();
+        for (size_t i = 0; i < len / 2; ++i) {
+            swap(reversedStr[i], reversedStr[len - i - 1]);
+        }
+        return reversedStr;
+    }
 
     // Read Simple Dictionary
     void readDictionary()
@@ -211,8 +236,7 @@ public:
                         // Reversal: add both the word and its reversal to the dictionary
                         specialChars = "&";
                         addEntry(word);
-                        reverse(word.begin(), word.end());
-                        addEntry(word);
+                        addEntry(reverseString(word));
 
                         break;
 
@@ -303,7 +327,6 @@ public:
         bool beginFound = false;
         bool endFound = false;
         deque<size_t> path;
-        vector<tuple<char, int, char>> output;
 
         for (size_t i = 0; i < entries.size(); i++)
         {
@@ -327,18 +350,22 @@ public:
 
         if (!beginFound)
         {
-            cerr << "Error: Begin word '" << opt.begin << "' not found in the dictionary." << endl;
+            // spec error message
+            cerr << "Beginning word does not exist in the dictionary" << endl;
+            cerr << " Beginning word: " << opt.begin << endl;
             exit(1);
         }
 
         if (!endFound)
         {
-            cerr << "Error: End word '" << opt.end << "' not found in the dictionary." << endl;
+            // spec error message
+            cerr << "Ending word does not exist in the dictionary" << endl;
+            cerr << " Ending Word: " << opt.end << endl;
             exit(1);
         }
 
         int discoveredCount;
-        path = searchAssist(opt, discoveredCount, output);
+        path = searchAssist(opt, discoveredCount);
 
         
         if (path.empty()) {
@@ -352,9 +379,12 @@ public:
 
             // OutputMode::kModiciations::kMorph
             if (opt.outputMode == OutputMode::kMorph) {
-                cout << entries[0].word << "\n";
+                cout << opt.begin << endl;
                 for (const auto& id: path) {
-                    cout << get<0>(output[id])<< "," << get<1>(output[id]) << "," << get<2>(output[id]) << endl;
+                    if (entries[id].modType == ModificationType::kNone) {
+                        continue;
+                    }
+                    cout << entries[id].modType << "," << entries[id].modIndex << "," << entries[id].modLetter << endl;
                 }
 
             }
@@ -368,8 +398,9 @@ public:
         }
     }
 
-    deque<size_t> searchAssist(Options opt, int &discoveredCount, vector<tuple<char, int, char>> &output)
+    deque<size_t> searchAssist(Options opt, int &discoveredCount)
     {
+        // int count = 0; // for testing
         discoveredCount = 0;
         // create vector to store path
         deque<size_t> path;
@@ -398,7 +429,7 @@ public:
             // loop through all entris of the dictionary and check neighbor methods
             for (size_t i = 0; i < entries.size(); i++)
             {
-                // check to see if word has already been discovered
+                // check to see if word has already been discovered or first word
                 if (entries[i].discovered)
                 {
                     // if no, skip it
@@ -406,11 +437,11 @@ public:
                 }
                 // check to see if word is neighbor
 
-                if (get<0>(isNeighbor(nextID, i, opt.Modifications)) != 'F')
+                if ((isNeighbor(nextID, i, opt.Modifications)))
                 {
-                    output.push_back(isNeighbor(nextID, i, opt.Modifications));
                     entries[i].discovered = true;
                     entries[i].previousIndex = nextID;
+                    entries[i].modLetter = entries[i].word[entries[i].modIndex];
                     discoveredCount++;
                     // if is end word, you're done
                     if (i == endWordIndex)
@@ -431,37 +462,42 @@ public:
             // there's no solution and we can return an empty path
             return path;
         }
-
         // otherwise, build the path from end back to beginning and reverse
+        // int count = 0; // testing
         while (entries[path.front()].previousIndex != numeric_limits<size_t>::max())
         {
+            // Output mode words
             path.push_front(entries[path.front()].previousIndex);
+
+            // Output mode Morph
+            // if (opt.outputMode == OutputMode::kMorph && count < path.size()) {
+            //     entries[count].modLetter = (entries[path.front()].previousIndex);
+            // }
         }
         return path;
     }
 
 
-    tuple<char, int, char> isNeighbor(size_t sourceID, size_t otherID, const vector<ModificationType> &mods)
+    bool isNeighbor(size_t sourceID, size_t otherID, const vector<ModificationType> &mods)
     {
         string w1 = entries[sourceID].word;
         string w2 = entries[otherID].word;
         int sizeComp = static_cast<int>(w1.size() - w2.size());
         int swaps = 0;
-        // variables for Tuple to be returned
+        // variables for tuple to be returned
         int diffs = 0;
-        size_t j = 0;
-        char c = 'F';
         // if the sizes are off by more than one, return false
-        if (sizeComp > 1 || sizeComp < -1) return {'F', -1, 'F'};
-         // check indifidual characters to see how many are different
-        for (size_t i = 0; i < min(w1.size(), w2.size()) - 1; i++)
-        {
+        if (sizeComp > 1 || sizeComp < -1) return false;
+        // check indifidual characters to see how many are different
+        for (size_t i = 0; i < min(w1.size(), w2.size()) - 1; i++) {
             if (w1[i] != w2[i]) {
                 diffs++;
-                j = i;
-                c = w2[j];
+                if (diffs == 1) {
+                    entries[otherID].modIndex = i;
+                }
+                // entries[otherID].modLetter = w2[i];
+                if ((w1[i] == w2[i + 1]) && (w1[i + 1] == w2[i])) swaps++;
             }
-            if ((w1[i] == w2[i + 1]) && (w1[i + 1] == w2[i])) swaps++;
         }
         
         // last character check for diffs
@@ -470,21 +506,37 @@ public:
         if (w1[w1.size() - 1] == w2[w2.size() - 2] && w1[w1.size() - 1] == w2[w2.size() - 2]) swaps++;
 
         // Change
-        if (find(mods.begin(), mods.end(), ModificationType::kChange) != mods.end()) {
-            if (diffs == 1 && sizeComp == 0) return {'c', j, c};
+        if (manualFind(ModificationType::kChange, mods)) {
+            if (diffs == 1 && sizeComp == 0) {
+                
+                // for testing:
+                //  cout << "Word 1: " << w1 << " location: " << j << " letter:  " <<  c;
+                //  cout << " Word 2: " << w2 << endl;
+                entries[otherID].modType = ModificationType::kChange;
+                return true;
+            }
         }
 
         // Length
-        else if (find(mods.begin(), mods.end(), ModificationType::kLength) != mods.end()) {
-            if ((sizeComp == 1 || sizeComp == -1) && diffs == 1) return {'l', j, c};
+        else if (manualFind(ModificationType::kLength, mods)) {
+            if (sizeComp == 1) {
+                entries[otherID].modType = ModificationType::kDelete;
+                return true;
+            } else if (sizeComp == -1) {
+                entries[otherID].modType = ModificationType::kInsert;
+                return true;
+            }
         }
 
         // Swap
-        else if (find(mods.begin(), mods.end(), ModificationType::kSwap) != mods.end()) {
-            if (swaps == 1 && diffs == 2 && sizeComp == 0) return {'p', j, c};
+        else if (manualFind(ModificationType::kSwap, mods)) {
+            if (swaps == 1 && diffs == 2 && sizeComp == 0) {
+            entries[otherID].modType = ModificationType::kSwap;
+            return true;
+            }
         }
 
-        return {'F', -1, 'F'};
+        return false;
         }
 
 private:
@@ -527,12 +579,13 @@ void getMode(int argc, char *argv[], Options &options)
             string arg{optarg};
             if (arg != "M" && arg != "W")
             {
+                // spec error message
                 // The first line of error output has to be a 'fixed' message
                 // for the autograder to show it to you.
-                cerr << "Error: invalid mode" << endl;
+                cerr << "Invalid output mode specified" << endl;
                 // The second line can provide more information, but you
                 // won't see it on the AG.
-                cerr << "  I don't recognize: " << arg << endl;
+                cerr << "  Output mode: " << arg << endl;
                 exit(1);
             } // if ..arg valid
 
@@ -553,7 +606,7 @@ void getMode(int argc, char *argv[], Options &options)
             {
                 // The first line of error output has to be a 'fixed' message
                 // for the autograder to show it to you.
-                cerr << "Error: must supply a begin word" << endl;
+                cerr << "Beginning word not specified" << endl;
                 exit(1);
             } // if ..arg valid
             options.begin = arg;
@@ -567,7 +620,7 @@ void getMode(int argc, char *argv[], Options &options)
             {
                 // The first line of error output has to be a 'fixed' message
                 // for the autograder to show it to you.
-                cerr << "Error: must supply an end word" << endl;
+                cerr << "Ending word not specified" << endl;
                 exit(1);
             } // if ..arg valid
             options.end = arg;
@@ -578,7 +631,7 @@ void getMode(int argc, char *argv[], Options &options)
         {
             if (options.routeMode != RouteMode::kNone)
             {
-                cerr << "Error: You cannot specify queue and stack to routeMode at the same time" << endl;
+                cerr << "Conflicting or duplicate stack and queue specified" << endl;
                 exit(1);
             }
             options.routeMode = RouteMode::kQueue;
@@ -588,7 +641,7 @@ void getMode(int argc, char *argv[], Options &options)
         {
             if (options.routeMode != RouteMode::kNone)
             {
-                cerr << "Error: You cannot specify queue and stack to routeMode at the same time" << endl;
+                cerr << "Conflicting or duplicate stack and queue specified" << endl;
                 exit(1);
             }
             options.routeMode = RouteMode::kStack;
@@ -613,23 +666,23 @@ void getMode(int argc, char *argv[], Options &options)
         }
 
         default:
-            cerr << "Error: invalid option" << endl;
+            cerr << "Unknown command line option" << endl;
             exit(1);
         } // switch ..choice
     }     // while
     if (options.routeMode == RouteMode::kNone)
     {
-        cerr << "Error: no mode specified - Must specify routeMode like queue or stack" << endl;
+        cerr << "Must specify one of stack or queue" << endl;
         exit(1);
     } // if ..mode
     if (options.Modifications.empty())
     {
-        cerr << "Error: no modifications specified - Must specify at least one of change(c), length(l), or swap(p)" << endl;
+        cerr << "Must specify at least one modification mode (change length swap)" << endl;
         exit(1);
     }
-    if (options.end.size() != options.begin.size() && find(options.Modifications.begin(), options.Modifications.end(), ModificationType::kLength) == options.Modifications.end())
-    {
-        cerr << "Error: Must specify length modification when begin and end words are different lengths" << endl;
+    if (options.end.size() != options.begin.size() && manualFind(ModificationType::kChange, options.Modifications))
+    {                                       
+        cerr << "The first and last words must have the same length when length mode is off" << endl;
     }
 } // getMode()
 
