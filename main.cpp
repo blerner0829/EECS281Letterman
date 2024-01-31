@@ -149,10 +149,13 @@ struct DictionaryEntry
     size_t previousIndex;
     ModificationType modType;
     size_t modIndex;
-    char modLetter;
+    string mod;
 
     // Constructor
-    DictionaryEntry(const string &w) : word(w), discovered(false), previousIndex(numeric_limits<size_t>::max()), modType(ModificationType::kNone), modIndex(numeric_limits<size_t>::max()), modLetter('F') {}
+    DictionaryEntry(const string &w) : word(w), 
+    discovered(false), previousIndex(numeric_limits<size_t>::max()), 
+    modType(ModificationType::kNone), modIndex(numeric_limits<size_t>::max()), 
+    mod("") {}
 };
 
 // Define the Dictionary class
@@ -221,16 +224,6 @@ public:
                 {
                     switch (line[j])
                     {
-
-                    case '\n':
-                        if (word.size() != 0)
-                        {
-                            addEntry(word);
-                            cout << "Adding Word to Entries: " << word << endl;
-                            word = "";
-                            i++;
-                        }
-                        break;
 
                     case '&':
                         // Reversal: add both the word and its reversal to the dictionary
@@ -318,7 +311,7 @@ public:
     {
         for (const auto &entry : entries)
         {
-            cout << entry.word << endl;
+            cout << entry.word << '\n';
         }
     }
     // should I pass in opt by reference?
@@ -375,16 +368,14 @@ public:
         else 
         {
             // print out message
-            cout << "Words in morph: " << path.size() << endl;
+            cout << "Words in morph: " << path.size() << '\n';
 
             // OutputMode::kModiciations::kMorph
             if (opt.outputMode == OutputMode::kMorph) {
                 cout << opt.begin << endl;
+                path.pop_front();
                 for (const auto& id: path) {
-                    if (entries[id].modType == ModificationType::kNone) {
-                        continue;
-                    }
-                    cout << entries[id].modType << "," << entries[id].modIndex << "," << entries[id].modLetter << endl;
+                    cout << entries[id].modType << "," << entries[id].modIndex << "," << entries[id].mod << '\n';
                 }
 
             }
@@ -441,7 +432,7 @@ public:
                 {
                     entries[i].discovered = true;
                     entries[i].previousIndex = nextID;
-                    entries[i].modLetter = entries[i].word[entries[i].modIndex];
+                    // entries[i].modLetter = entries[i].word[entries[i].modIndex];
                     discoveredCount++;
                     // if is end word, you're done
                     if (i == endWordIndex)
@@ -457,11 +448,9 @@ public:
         }
 
         // if you've gotten this far and have not found end word
-        if (path.empty())
+        if (!path.empty())
         {
             // there's no solution and we can return an empty path
-            return path;
-        }
         // otherwise, build the path from end back to beginning and reverse
         // int count = 0; // testing
         while (entries[path.front()].previousIndex != numeric_limits<size_t>::max())
@@ -474,6 +463,7 @@ public:
             //     entries[count].modLetter = (entries[path.front()].previousIndex);
             // }
         }
+        }
         return path;
     }
 
@@ -484,41 +474,48 @@ public:
         string w2 = entries[otherID].word;
         int sizeComp = static_cast<int>(w1.size() - w2.size());
         int swaps = 0;
-        // variables for tuple to be returned
-        int diffs = 0;
+        vector<size_t> diffs;
         // if the sizes are off by more than one, return false
         if (sizeComp > 1 || sizeComp < -1) return false;
+
+        bool checkChange = manualFind(ModificationType::kChange, mods);
+        bool checkLength = manualFind(ModificationType::kLength, mods);
+        bool checkSwap = manualFind(ModificationType::kSwap, mods);
         // check indifidual characters to see how many are different
-        for (size_t i = 0; i < min(w1.size(), w2.size()) - 1; i++) {
-            if (w1[i] != w2[i]) {
-                diffs++;
-                if (diffs == 1) {
-                    entries[otherID].modIndex = i;
+        if (sizeComp == 0 && (checkChange || checkSwap)) {
+            for (size_t i = 0; i < w1.size(); i++) {
+                if (w1[i] != w2[i]) {
+                    diffs.push_back(i);
+
+                    if ((i < w1.size() - 1) && (w1[i] == w2[i + 1]) && (w1[i + 1] == w2[i])) swaps++;
                 }
-                // entries[otherID].modLetter = w2[i];
-                if ((w1[i] == w2[i + 1]) && (w1[i + 1] == w2[i])) swaps++;
             }
         }
-        
-        // last character check for diffs
-        if (w1[w1.size() - 1] != w2[w1.size() - 1]) diffs++;
-        // last character check for swappable elements
-        if (w1[w1.size() - 1] == w2[w2.size() - 2] && w1[w1.size() - 1] == w2[w2.size() - 2]) swaps++;
 
         // Change
-        if (manualFind(ModificationType::kChange, mods)) {
-            if (diffs == 1 && sizeComp == 0) {
-                
-                // for testing:
-                //  cout << "Word 1: " << w1 << " location: " << j << " letter:  " <<  c;
-                //  cout << " Word 2: " << w2 << endl;
-                entries[otherID].modType = ModificationType::kChange;
+        if (!diffs.empty()) {
+            switch (diffs.size())
+            {
+            case 1: 
+                 if (!checkChange) break;
+                 entries[otherID].modIndex = diffs[0];
+                 entries[otherID].modType = ModificationType::kChange;
+                 entries[otherID].mod = w2[diffs[0]];
+                 return true;
+            case 2:
+                if (!checkSwap) break;
+                entries[otherID].modIndex = diffs[0];
+                entries[otherID].modType = ModificationType::kSwap;
+                entries[otherID].mod = w2.substr(diffs[0], 2);
                 return true;
+
+            default:
+                break;
             }
         }
 
         // Length
-        else if (manualFind(ModificationType::kLength, mods)) {
+        if (checkLength) {
             if (sizeComp == 1) {
                 entries[otherID].modType = ModificationType::kDelete;
                 return true;
@@ -529,13 +526,14 @@ public:
         }
 
         // Swap
-        else if (manualFind(ModificationType::kSwap, mods)) {
-            if (swaps == 1 && diffs == 2 && sizeComp == 0) {
-            entries[otherID].modType = ModificationType::kSwap;
-            return true;
+        /*
+        else if (checkSwap) {
+            if (swaps == 1) {
+                entries[otherID].modType = ModificationType::kSwap;
+                return true;
             }
         }
-
+*/
         return false;
         }
 
